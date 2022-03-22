@@ -630,11 +630,11 @@ pub(crate) fn central_header_to_zip_file<R: Read + io::Seek>(
     let central_header_start = reader.seek(io::SeekFrom::Current(0))?;
 	let central_header = spec::CentralDirectoryHeader::parse(reader)?;
 
-    let file_name = match central_header.is_utf8() {
+    let file_name = match central_header.flags.is_utf8() {
         true => String::from_utf8_lossy(&*central_header.file_name_raw).into_owned(),
         false => central_header.file_name_raw.clone().from_cp437(),
     };
-    let file_comment = match central_header.is_utf8() {
+    let file_comment = match central_header.flags.is_utf8() {
         true => String::from_utf8_lossy(&*central_header.file_comment_raw).into_owned(),
         false => central_header.file_comment_raw.clone().from_cp437(),
     };
@@ -643,8 +643,8 @@ pub(crate) fn central_header_to_zip_file<R: Read + io::Seek>(
     let mut result = ZipFileData {
         system: System::from_u8((central_header.version_made_by >> 8) as u8),
         version_made_by: central_header.version_made_by as u8,
-        encrypted: central_header.encrypted(),
-        using_data_descriptor: central_header.using_data_descriptor(),
+        encrypted: central_header.flags.encrypted(),
+        using_data_descriptor: central_header.flags.using_data_descriptor(),
         compression_method: {
             #[allow(deprecated)]
             CompressionMethod::from_u16(central_header.compression_method)

@@ -22,6 +22,10 @@ pub struct CentralDirectoryEnd {
 }
 
 impl CentralDirectoryEnd {
+    pub fn len(&self) -> usize {
+        22 + self.zip_file_comment.len()
+    }
+
     pub fn parse<T: Read>(reader: &mut T) -> ZipResult<CentralDirectoryEnd> {
         let magic = reader.read_u32::<LittleEndian>()?;
         if magic != CENTRAL_DIRECTORY_END_SIGNATURE {
@@ -205,11 +209,31 @@ impl Zip64CentralDirectoryEnd {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct GeneralPurposeBitFlags(pub u16);
+
+impl GeneralPurposeBitFlags {
+    #[inline]
+    pub fn encrypted(&self) -> bool {
+        self.0 & 1 == 1
+    }
+
+    #[inline]
+    pub fn is_utf8(&self) -> bool {
+        self.0 & (1 << 11) != 0
+    }
+
+    #[inline]
+    pub fn using_data_descriptor(&self) -> bool {
+        self.0 & (1 << 3) != 0
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CentralDirectoryHeader {
     pub version_made_by: u16,
     pub version_to_extract: u16,
-    pub flags: u16,
+    pub flags: GeneralPurposeBitFlags,
     pub compression_method: u16,
     pub last_mod_time: u16,
     pub last_mod_date: u16,
@@ -226,14 +250,8 @@ pub struct CentralDirectoryHeader {
 }
 
 impl CentralDirectoryHeader {
-    pub fn encrypted(&self) -> bool {
-        self.flags & 1 == 1
-    }
-    pub fn is_utf8(&self) -> bool {
-        self.flags & (1 << 11) != 0
-    }
-    pub fn using_data_descriptor(&self) -> bool {
-        self.flags & (1 << 3) != 0
+    pub fn len(&self) -> usize {
+        46 + self.file_name_raw.len() + self.extra_field.len() + self.file_comment_raw.len()
     }
     pub fn parse<R: Read>(reader: &mut R) -> ZipResult<CentralDirectoryHeader> {
         let signature = reader.read_u32::<LittleEndian>()?;
@@ -267,7 +285,7 @@ impl CentralDirectoryHeader {
         Ok(CentralDirectoryHeader {
             version_made_by,
             version_to_extract,
-            flags,
+            flags: GeneralPurposeBitFlags(flags),
             compression_method,
             last_mod_time,
             last_mod_date,
@@ -288,7 +306,7 @@ impl CentralDirectoryHeader {
         writer.write_u32::<LittleEndian>(CENTRAL_DIRECTORY_HEADER_SIGNATURE)?;
         writer.write_u16::<LittleEndian>(self.version_made_by)?;
         writer.write_u16::<LittleEndian>(self.version_to_extract)?;
-        writer.write_u16::<LittleEndian>(self.flags)?;
+        writer.write_u16::<LittleEndian>(self.flags.0)?;
         writer.write_u16::<LittleEndian>(self.compression_method)?;
         writer.write_u16::<LittleEndian>(self.last_mod_time)?;
         writer.write_u16::<LittleEndian>(self.last_mod_date)?;
@@ -305,6 +323,79 @@ impl CentralDirectoryHeader {
         writer.write_all(&self.file_name_raw)?;
         writer.write_all(&self.extra_field)?;
         writer.write_all(&self.file_comment_raw)?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LocalFileHeader {
+    pub version_to_extract: u16,
+    pub flags: GeneralPurposeBitFlags,
+    pub compression_method: u16,
+    pub last_mod_time: u16,
+    pub last_mod_date: u16,
+    pub crc32: u32,
+    pub compressed_size: u32,
+    pub uncompressed_size: u32,
+    pub file_name_raw: Vec<u8>,
+    pub extra_field: Vec<u8>,
+}
+
+impl LocalFileHeader {
+    pub fn len(&self) -> usize {
+        30 + self.file_name_raw.len() + self.extra_field.len()
+    }
+
+    pub fn parse<R: Read>(reader: &mut R) -> ZipResult<LocalFileHeader> {
+        let signature = reader.read_u32::<LittleEndian>()?;
+        if signature != LOCAL_FILE_HEADER_SIGNATURE {
+            return Err(ZipError::InvalidArchive("Invalid local file header"));
+        }
+
+        let version_to_extract = reader.read_u16::<LittleEndian>()?;
+        let flags = reader.read_u16::<LittleEndian>()?;
+        let compression_method = reader.read_u16::<LittleEndian>()?;
+        let last_mod_time = reader.read_u16::<LittleEndian>()?;
+        let last_mod_date = reader.read_u16::<LittleEndian>()?;
+        let crc32 = reader.read_u32::<LittleEndian>()?;
+        let compressed_size = reader.read_u32::<LittleEndian>()?;
+        let uncompressed_size = reader.read_u32::<LittleEndian>()?;
+        let file_name_length = reader.read_u16::<LittleEndian>()?;
+        let extra_field_length = reader.read_u16::<LittleEndian>()?;
+
+        let mut file_name_raw = vec![0; file_name_length as usize];
+        reader.read_exact(&mut file_name_raw)?;
+        let mut extra_field = vec![0; extra_field_length as usize];
+        reader.read_exact(&mut extra_field)?;
+
+        Ok(LocalFileHeader {
+            version_to_extract,
+            flags: GeneralPurposeBitFlags(flags),
+            compression_method,
+            last_mod_time,
+            last_mod_date,
+            crc32,
+            compressed_size,
+            uncompressed_size,
+            file_name_raw,
+            extra_field,
+        })
+    }
+
+    pub fn write<T: Write>(&self, writer: &mut T) -> ZipResult<()> {
+        writer.write_u32::<LittleEndian>(LOCAL_FILE_HEADER_SIGNATURE)?;
+        writer.write_u16::<LittleEndian>(self.version_to_extract)?;
+        writer.write_u16::<LittleEndian>(self.flags.0)?;
+        writer.write_u16::<LittleEndian>(self.compression_method)?;
+        writer.write_u16::<LittleEndian>(self.last_mod_time)?;
+        writer.write_u16::<LittleEndian>(self.last_mod_date)?;
+        writer.write_u32::<LittleEndian>(self.crc32)?;
+        writer.write_u32::<LittleEndian>(self.compressed_size)?;
+        writer.write_u32::<LittleEndian>(self.uncompressed_size)?;
+        writer.write_u16::<LittleEndian>(self.file_name_raw.len() as u16)?;
+        writer.write_u16::<LittleEndian>(self.extra_field.len() as u16)?;
+        writer.write_all(&self.file_name_raw)?;
+        writer.write_all(&self.extra_field)?;
         Ok(())
     }
 }
