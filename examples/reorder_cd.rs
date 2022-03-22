@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		extra_field: Vec::new(),
 	};
 	let padding = mask.len() + eocd.len();
-	let mut output = vec![0; padding + bytes.len()];
+	let mut output = vec![0; mask.len() + bytes.len()];
 	let mut cdh_i = mask.len();
 	let mut lfh_i = padding + eocd.central_directory_size as usize;
 
@@ -50,7 +50,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		lfh_i += file_bytes.len();
 	}
 	eocd.central_directory_offset = mask.len() as u32;
-	eocd.write(&mut &mut output[lfh_i..])?;
 	eocd.write(&mut &mut output[cdh_i..cdh_i+eocd.len()])?;
 
 	mask.compressed_size = (lfh_i - mask.len()) as u32;
