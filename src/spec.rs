@@ -9,6 +9,7 @@ pub const CENTRAL_DIRECTORY_HEADER_SIGNATURE: u32 = 0x02014b50;
 const CENTRAL_DIRECTORY_END_SIGNATURE: u32 = 0x06054b50;
 pub const ZIP64_CENTRAL_DIRECTORY_END_SIGNATURE: u32 = 0x06064b50;
 const ZIP64_CENTRAL_DIRECTORY_END_LOCATOR_SIGNATURE: u32 = 0x07064b50;
+pub const DATA_DESCRIPTOR_SIGNATURE: u32 = 0x08074b50;
 
 #[derive(Clone, Debug)]
 pub struct CentralDirectoryEnd {
@@ -227,6 +228,14 @@ impl GeneralPurposeBitFlags {
     pub fn using_data_descriptor(&self) -> bool {
         self.0 & (1 << 3) != 0
     }
+
+    #[inline]
+    pub fn set_using_data_descriptor(&mut self, b: bool) {
+        self.0 &= !(1 << 3);
+        if b {
+            self.0 |= 1 << 3;
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -397,5 +406,30 @@ impl LocalFileHeader {
         writer.write_all(&self.file_name_raw)?;
         writer.write_all(&self.extra_field)?;
         Ok(())
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct DataDescriptor {
+    pub crc32: u32,
+    pub compressed_size: u32,
+    pub uncompressed_size: u32,
+}
+
+impl DataDescriptor {
+    pub fn read<T: Read>(reader: &mut T) -> ZipResult<DataDescriptor> {
+        let first_word = reader.read_u32::<LittleEndian>()?;
+        let crc32 = if first_word == DATA_DESCRIPTOR_SIGNATURE {
+            reader.read_u32::<LittleEndian>()?
+        } else {
+            first_word
+        };
+        let compressed_size = reader.read_u32::<LittleEndian>()?;
+        let uncompressed_size = reader.read_u32::<LittleEndian>()?;
+        Ok(DataDescriptor {
+            crc32,
+            compressed_size,
+            uncompressed_size,
+        })
     }
 }
